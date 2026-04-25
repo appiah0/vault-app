@@ -65,7 +65,37 @@ async function loadVault(key) {
 }
 
 async function saveVault(items, key) {
-  localStorage.setItem(K_VAULT, await aesEncrypt(JSON.stringify(items), key));
+  try {
+    const enc = await aesEncrypt(JSON.stringify(items), key);
+    localStorage.setItem(K_VAULT, enc);
+  } catch (e) {
+    if (e.name === "QuotaExceededError" || (e.message && e.message.includes("quota"))) {
+      throw new Error("QUOTA");
+    }
+    throw e;
+  }
+}
+
+// ─── Image compression ────────────────────────────────────────────────────────
+// Resizes to max 800px wide/tall, compresses to JPEG 0.7
+// Reduces a 3MB phone photo down to ~80-150KB
+function compressImage(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const MAX = 800;
+      let { width: w, height: h } = img;
+      if (w > MAX || h > MAX) {
+        if (w > h) { h = Math.round(h * MAX / w); w = MAX; }
+        else       { w = Math.round(w * MAX / h); h = MAX; }
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      canvas.getContext("2d").drawImage(img, 0, 0, w, h);
+      resolve(canvas.toDataURL("image/jpeg", 0.7));
+    };
+    img.src = dataUrl;
+  });
 }
 
 // ─── Backup helpers ───────────────────────────────────────────────────────────
@@ -348,8 +378,10 @@ function PwInp({ value, onChange, placeholder="Password", strength=false }) {
   </>;
 }
 
-function Toast({ msg, color = "var(--grn)" }) {
-  return <div className="toast"><Ic d={I.check} size={15} color={color}/><span style={{color}}>{msg}</span></div>;
+function Toast({ msg, type = "ok" }) {
+  const color = type === "error" ? "var(--red)" : "var(--grn)";
+  const icon  = type === "error" ? I.x : I.check;
+  return <div className="toast"><Ic d={icon} size={15} color={color}/><span style={{color}}>{msg}</span></div>;
 }
 
 // ─── Auth Screen ──────────────────────────────────────────────────────────────
@@ -616,7 +648,12 @@ function ItemForm({ initial, onSave, onClose }) {
 
   function pickImages(files) {
     Array.from(files).forEach(file=>{
-      const r=new FileReader(); r.onload=e=>setForm(f=>({...f,images:[...(f.images||[]),e.target.result]})); r.readAsDataURL(file);
+      const r=new FileReader();
+      r.onload=async e=>{
+        const compressed = await compressImage(e.target.result);
+        setForm(f=>({...f,images:[...(f.images||[]),compressed]}));
+      };
+      r.readAsDataURL(file);
     });
   }
 
@@ -795,9 +832,9 @@ export default function App() {
   const [toast,   setToast]   = useState(null);
   const timer = useRef();
 
-  function showToast(msg) {
+  function showToast(msg, type="ok") {
     clearTimeout(timer.current);
-    setToast(msg);
+    setToast({msg, type});
     timer.current = setTimeout(()=>setToast(null), 2200);
   }
 
@@ -811,15 +848,30 @@ export default function App() {
   // ── Persist: always uses the key stored in state ──────────────────────────
   async function persist(items) {
     setVault(items);
-    await saveVault(items, key);
+    try {
+      await saveVault(items, key);
+    } catch(e) {
+      // Roll back UI if save failed
+      setVault(vault);
+      if (e.message === "QUOTA") {
+        showToast("Storage full! Images are too large.", "error");
+      } else {
+        showToast("Save failed. Try again.", "error");
+      }
+      throw e;
+    }
   }
 
   async function handleSave(item) {
     const isUpdate = vault.some(v=>v.id===item.id);
     const next = isUpdate ? vault.map(v=>v.id===item.id?item:v) : [item,...vault];
-    await persist(next);
-    setAdding(false); setEditing(null); setDetail(item);
-    showToast(isUpdate?"Entry updated ✓":"Entry saved ✓");
+    try {
+      await persist(next);
+      setAdding(false); setEditing(null); setDetail(item);
+      showToast(isUpdate?"Entry updated ✓":"Entry saved ✓");
+    } catch(e) {
+      // Error already shown by persist()
+    }
   }
 
   async function handleDelete(id) {
@@ -939,7 +991,7 @@ export default function App() {
       {(adding||editing) && (
         <ItemForm initial={editing} onSave={handleSave} onClose={()=>{setAdding(false);setEditing(null);if(editing)setDetail(editing);}}/>
       )}
-      {toast && <Toast msg={toast}/>}
+      {toast && <Toast msg={toast.msg} type={toast.type}/>}
     </div>
     </>
   );
