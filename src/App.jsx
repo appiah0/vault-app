@@ -12,12 +12,23 @@ async function deriveKey(password, salt) {
   );
 }
 
+// Safe btoa for large buffers — avoids "Maximum call stack size exceeded"
+// when spreading large Uint8Arrays into String.fromCharCode
+function u8ToBase64(u8) {
+  let binary = "";
+  const chunk = 8192; // process in 8KB chunks
+  for (let i = 0; i < u8.length; i += chunk) {
+    binary += String.fromCharCode(...u8.subarray(i, i + chunk));
+  }
+  return btoa(binary);
+}
+
 async function aesEncrypt(text, key) {
   const iv  = crypto.getRandomValues(new Uint8Array(12));
   const ct  = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, ENC.encode(text));
   const out = new Uint8Array(12 + ct.byteLength);
   out.set(iv); out.set(new Uint8Array(ct), 12);
-  return btoa(String.fromCharCode(...out));
+  return u8ToBase64(out); // safe for any size
 }
 
 async function aesDecrypt(b64, key) {
@@ -35,7 +46,7 @@ function getOrCreateSalt() {
   const s = localStorage.getItem(K_SALT);
   if (s) { try { return Uint8Array.from(atob(s), c => c.charCodeAt(0)); } catch {} }
   const salt = crypto.getRandomValues(new Uint8Array(16));
-  localStorage.setItem(K_SALT, btoa(String.fromCharCode(...salt)));
+  localStorage.setItem(K_SALT, u8ToBase64(salt));
   return salt;
 }
 async function saveVerifier(key) {
@@ -161,7 +172,7 @@ async function exportBackup(vault, backupPw) {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const key  = await deriveKey(backupPw, salt);
   const enc  = await aesEncrypt(JSON.stringify(vault), key);
-  return JSON.stringify({ v: 2, salt: btoa(String.fromCharCode(...salt)), data: enc, at: new Date().toISOString() });
+  return JSON.stringify({ v: 2, salt: u8ToBase64(salt), data: enc, at: new Date().toISOString() });
 }
 
 async function importBackup(text, backupPw) {
