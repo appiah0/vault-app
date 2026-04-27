@@ -549,7 +549,7 @@ function ExportModal({ vault, onClose, toast }) {
         <div className="mbdy">
           <div className="inf" style={{marginBottom:16}}>
             <Ic d={I.info} size={16} color="var(--ac2)" sw={2} style={{flexShrink:0,marginTop:1}}/>
-            <div>Creates an encrypted <b style={{color:"var(--tx)"}}.json</b> file protected by a backup password. Save it to Google Drive, WhatsApp, or email.</div>
+            <div>Creates an encrypted <b style={{color:"var(--tx)"}}>.json</b> file protected by a backup password. Save it to Google Drive, WhatsApp, or email.</div>
           </div>
           <div className="ig"><label className="lbl">Backup Password</label>
             <PwInp value={pw} onChange={setPw} placeholder="Choose a backup password" strength/></div>
